@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grande Retraite des Jeunes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+<body class="bg-gradient-to-r from-purple-600 to-blue-600 min-h-screen flex flex-col items-center justify-center p-6">
+
+  <h1 class="text-white text-3xl font-bold mb-8 text-center">24h dans sa présence - Grande Retraite des Jeunes</h1>
+
+  <div id="countdown" class="text-white text-4xl font-mono mb-10"></div>
+
+  <form id="inscriptionForm" class="bg-white bg-opacity-90 p-8 rounded-lg shadow-lg max-w-md w-full space-y-6">
+    <h2 class="text-xl font-semibold mb-4 text-center">Inscription & téléchargement du ticket</h2>
+
+    <input type="text" name="nom" placeholder="Nom complet" required
+      class="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+
+    <input type="text" name="quartier" placeholder="Quartier"
+      class="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+
+    <input type="tel" name="numero" placeholder="Numéro de téléphone"
+      class="w-full p-3 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500" />
+
+    
+    <div>
+      <label class="font-semibold block mb-1">Confirmer votre présence :</label>
+      <label class="inline-flex items-center mr-6">
+        <input type="radio" name="presence" value="Confirmée" required class="form-radio" />
+        <span class="ml-2">Oui</span>
+      </label>
+      <label class="inline-flex items-center">
+        <input type="radio" name="presence" value="Non" class="form-radio" />
+        <span class="ml-2">Non</span>
+      </label>
+    </div>
+
+    <button type="submit" class="w-full bg-purple-600 text-white py-3 rounded font-semibold hover:bg-purple-700 transition">
+      Télécharger le ticket PDF
+    </button>
+  </form>
+
+  <script>
+    // --- Compte à rebours jusqu'au dimanche 17h ---
+    function updateCountdown() {
+      const countdownEl = document.getElementById("countdown");
+      const now = new Date();
+      // Prochain dimanche 17h
+      const target = new Date(now);
+      target.setHours(17, 0, 0, 0);
+      const day = target.getDay();
+
+      if (day !== 0) {
+        // 0 = dimanche, avancer jusqu'au dimanche prochain
+        target.setDate(target.getDate() + (7 - day));
+      }
+
+      let diff = target - now;
+
+      if (diff < 0) {
+        countdownEl.textContent = "La retraite est en cours ou terminée.";
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      diff -= days * (1000 * 60 * 60 * 24);
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      diff -= hours * (1000 * 60 * 60);
+
+      const minutes = Math.floor(diff / (1000 * 60));
+      diff -= minutes * (1000 * 60);
+
+      const seconds = Math.floor(diff / 1000);
+
+      countdownEl.textContent = `${days}j ${hours}h ${minutes}m ${seconds}s`;
+    }
+    setInterval(updateCountdown, 1000);
+    updateCountdown();
+
+    // --- Formulaire + PDF + QR code + envoi API ---
+    document.getElementById("inscriptionForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const form = e.target;
+      const formData = new FormData(form);
+      const data = Object.fromEntries(formData.entries());
+
+      if (data.presence !== "Confirmée") {
+        alert("Pour télécharger le ticket, veuillez confirmer votre présence.");
+        return;
+      }
+
+      try {
+        // Envoi des données au backend Node.js
+        const res = await fetch("http://localhost:3000/api/inscriptions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json();
+
+        if (result.error) {
+          alert("Erreur serveur : " + result.error);
+          return;
+        }
+
+        // Générer PDF avec jsPDF et QR code
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        doc.setFontSize(18);
+        doc.text("Ticket - Grande Retraite des Jeunes", 20, 20);
+        doc.setFontSize(12);
+
+        const startY = 40;
+        const lineHeight = 8;
+        let y = startY;
+
+        doc.text(`Nom complet: ${data.nom}`, 20, y);
+        y += lineHeight;
+        doc.text(`Quartier: ${data.quartier || "-"}`, 20, y);
+        y += lineHeight;
+        doc.text(`Numéro: ${data.numero || "-"}`, 20, y);
+      
+        y += lineHeight;
+        doc.text(`Présence: ${data.presence}`, 20, y);
+        y += lineHeight * 2;
+
+        // Infos programme
+        doc.setFontSize(14);
+        doc.text("Programme : 24h dans sa présence", 20, y);
+        y += lineHeight;
+        doc.setFontSize(10);
+        doc.text("Dimanche 16h00 jusqu'au Lundi 17h00", 20, y);
+        y += lineHeight * 2;
+
+        // Générer QR code sous forme DataURL
+        const qrCanvas = document.createElement("canvas");
+        await QRCode.toCanvas(qrCanvas, JSON.stringify(data), { width: 100 });
+        const qrDataUrl = qrCanvas.toDataURL("image/png");
+        doc.addImage(qrDataUrl, "PNG", 150, startY, 40, 40);
+
+        doc.save(`Ticket_${data.nom.replace(/\s+/g, "_")}.pdf`);
+
+        alert("Ticket généré et inscription enregistrée !");
+        form.reset();
+      } catch (err) {
+        alert("Erreur : " + err.message);
+      }
+    });
+  </script>
+
+</body>
+</html>
